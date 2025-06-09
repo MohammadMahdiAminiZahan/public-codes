@@ -1,0 +1,137 @@
+from collections import deque, defaultdict
+
+# محیط دنیای ومپوس
+class WumpusWorldEnv:
+    def __init__(self, world):
+        self.world = list(reversed(world))  # معکوس برای شروع از پایین چپ
+        self.height = len(world)
+        self.width = len(world[0])
+
+    def get_percepts(self, x, y):
+        return self.world[y][x]
+
+    def neighbors(self, x, y):
+        deltas = [(1,0), (-1,0), (0,1), (0,-1)]
+        for dx, dy in deltas:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < self.width and 0 <= ny < self.height:
+                yield (nx, ny)
+
+# عامل استنتاج‌گر با دانش پیشرفته
+class InferenceAgent:
+    def __init__(self, env):
+        self.env = env
+        self.knowledge = {}  # {(x,y): Safe/Unsafe/Unknown}
+        self.visited = set()
+        self.safe_to_visit = set()
+        self.unsafe = set()
+        self.current = (0, 0)
+        self.path = [(0, 0)]
+        self.gold_found = False
+        self.pit_candidates = defaultdict(set)
+        self.wumpus_candidates = defaultdict(set)
+        self.pit_confirmed = None
+        self.wumpus_confirmed = None
+
+    def add_knowledge(self, x, y, percepts):
+        self.visited.add((x, y))
+        self.knowledge[(x, y)] = 'Safe'
+
+        neighbors = list(self.env.neighbors(x, y))
+        if 'B' in percepts:
+            for n in neighbors:
+                if n not in self.visited:
+                    self.pit_candidates[n].add((x, y))
+        if 'S' in percepts:
+            for n in neighbors:
+                if n not in self.visited:
+                    self.wumpus_candidates[n].add((x, y))
+
+        if 'B' not in percepts and 'S' not in percepts:
+            for nx, ny in neighbors:
+                if (nx, ny) not in self.visited:
+                    self.knowledge[(nx, ny)] = 'Safe'
+                    self.safe_to_visit.add((nx, ny))
+
+    def infer(self):
+        # استنتاج مکان دقیق گودال و ومپوس (فقط یکی از هرکدام)
+        for cell, sources in self.pit_candidates.items():
+            if len(sources) >= 2 and not self.pit_confirmed:
+                self.pit_confirmed = cell
+                self.unsafe.add(cell)
+        for cell, sources in self.wumpus_candidates.items():
+            if len(sources) >= 2 and not self.wumpus_confirmed:
+                self.wumpus_confirmed = cell
+                self.unsafe.add(cell)
+
+        if self.pit_confirmed:
+            self.safe_to_visit.discard(self.pit_confirmed)
+        if self.wumpus_confirmed:
+            self.safe_to_visit.discard(self.wumpus_confirmed)
+
+        for (cell, status) in list(self.knowledge.items()):
+            if status != 'Safe' and cell not in self.unsafe:
+                neighbors = list(self.env.neighbors(*cell))
+                danger = False
+                for nx, ny in neighbors:
+                    if (nx, ny) in self.visited:
+                        percepts = self.env.get_percepts(nx, ny)
+                        if 'B' in percepts or 'S' in percepts:
+                            danger = True
+                            break
+                if not danger:
+                    self.knowledge[cell] = 'Safe'
+                    self.safe_to_visit.add(cell)
+
+    def get_path_to(self, target):
+        queue = deque([(self.current, [self.current])])
+        visited = set()
+
+        while queue:
+            (cx, cy), path = queue.popleft()
+            if (cx, cy) == target:
+                return path
+
+            for nx, ny in self.env.neighbors(cx, cy):
+                if (nx, ny) in self.visited and (nx, ny) not in visited:
+                    visited.add((nx, ny))
+                    queue.append(((nx, ny), path + [(nx, ny)]))
+        return []
+
+    def run(self):
+        while True:
+            x, y = self.current
+            print(f"🤖 Agent at {(x, y)}")
+            percepts = self.env.get_percepts(x, y)
+            print(f"🧠 Percepts: {percepts}")
+
+            if 'G' in percepts:
+                print("🏆 Gold found at", (x, y))
+                self.gold_found = True
+                return True
+
+            self.add_knowledge(x, y, percepts)
+            self.infer()
+
+            moved = False
+            for next_cell in list(self.safe_to_visit):
+                if next_cell not in self.visited:
+                    path = self.get_path_to(next_cell)
+                    if path:
+                        for step in path[1:]:
+                            print(f"🚶 Moving to {step}")
+                            self.current = step
+                            self.path.append(step)
+                        self.safe_to_visit.remove(next_cell)
+                        moved = True
+                        break
+
+            if not moved:
+                print("🔁 Backtracking...")
+                if len(self.path) > 1:
+                    self.path.pop()
+                    self.current = self.path[-1]
+                    print(f"↩️ Backtracked to {self.current}")
+                else:
+                    print("❌ No more safe moves. Stopped.")
+                    return False
