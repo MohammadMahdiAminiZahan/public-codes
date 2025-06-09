@@ -79,7 +79,7 @@ class InferenceAgent:
             self.visited.add((x, y))
             percepts = self.env.get_percepts(x, y)
             if 'G' in percepts:
-                print(f"🎉 طلا در خانه {x},{y} پیدا شد!")
+                print(f"🎉 Tala dar khane {x},{y} peida shod!")
                 self.found_gold = True
                 return
             if 'B' in percepts:
@@ -110,10 +110,10 @@ class InferenceAgent:
                 self.path.extend(path[1:])
                 self.current = next_cell
             else:
-                print("🚫 هیچ مسیر امنی برای ادامه وجود ندارد.")
+                print("🚫 Hich masir amni baraye edame vojud nadarad.")
                 return
 
-# مثال محیط
+# Mesal mohit
 world = [
     ['B', 'B', '', ''],
     ['P', 'B', 'S', ''],
@@ -124,4 +124,4 @@ world = [
 env = Environment(world)
 agent = InferenceAgent(env)
 agent.explore()
-print("\n🧭 مسیر طی شده:", agent.path)
+print("\n🧭 Masir tay shode:", agent.path)
