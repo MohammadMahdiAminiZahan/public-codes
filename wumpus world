@@ -1,9 +1,27 @@
 from collections import deque, defaultdict
 
+class Environment:
+    def __init__(self, world):
+        self.world = world
+        self.height = len(world)
+        self.width = len(world[0]) if self.height > 0 else 0
+
+    def neighbors(self, x, y):
+        candidates = [(x-1,y), (x+1,y), (x,y-1), (x,y+1)]
+        return [(nx, ny) for (nx, ny) in candidates if 0 <= nx < self.width and 0 <= ny < self.height]
+
+    def get_percepts(self, x, y):
+        # هر خانه می‌تونه رشته‌ای شامل علامت‌ها مثل "B", "S", "P", "W", "G" یا ترکیبی باشه
+        return self.world[y][x]
+
+    def all_cells(self):
+        return [(x,y) for y in range(self.height) for x in range(self.width)]
+
+
 class ProbabilisticAgent:
     def __init__(self, env, risk_threshold=0.01):
         self.env = env
-        self.start = (0, 3)
+        self.start = (0, env.height - 1)  # شروع از پایین چپ
         self.current = self.start
         self.visited = set()
         self.safe = set([self.start])
@@ -26,21 +44,18 @@ class ProbabilisticAgent:
         return percept
 
     def update_probabilities(self):
-        # همه خانه‌ها که هنوز تایید نشده‌اند را به‌روزرسانی کن
         for cell in self.env.all_cells():
             if cell in self.safe or cell in self.confirmed_pits or cell == self.confirmed_wumpus:
                 continue
             pit_p = 0.0
             wumpus_p = 0.0
             adj = self.get_adjacent(*cell)
-            # اگر هیچ خانه‌ای Breeze نداشت، احتمال Pit صفر است
             breeze_sources = [c for c in adj if 'B' in self.percepts.get(c, '')]
             if breeze_sources:
-                pit_p = 1 - (0.5 ** len(breeze_sources))  # مدل ساده احتمال با افزایش شواهد
+                pit_p = 1 - (0.5 ** len(breeze_sources))
             else:
                 pit_p = 0.0
 
-            # اگر هیچ خانه‌ای Stench نداشت، احتمال Wumpus صفر است
             stench_sources = [c for c in adj if 'S' in self.percepts.get(c, '')]
             if stench_sources:
                 wumpus_p = 1 - (0.5 ** len(stench_sources))
@@ -50,13 +65,12 @@ class ProbabilisticAgent:
             self.pit_prob[cell] = pit_p
             self.wumpus_prob[cell] = wumpus_p
 
-        # اگر احتمال Pit یا Wumpus خیلی زیاد شد، تایید کن
         for cell in list(self.pit_prob.keys()):
             if self.pit_prob[cell] > 0.95:
                 self.confirmed_pits.add(cell)
                 if cell in self.safe:
                     self.safe.remove(cell)
-        # و برای ومپوس
+
         wumpus_candidates = [c for c,p in self.wumpus_prob.items() if p > 0.95]
         if len(wumpus_candidates) == 1:
             self.confirmed_wumpus = wumpus_candidates[0]
@@ -64,7 +78,6 @@ class ProbabilisticAgent:
                 self.safe.remove(self.confirmed_wumpus)
 
     def mark_safe_cells(self):
-        # خانه‌هایی که احتمال Pit و Wumpus پایین‌تر از آستانه هستند امن شناخته شوند
         for cell in self.env.all_cells():
             if cell in self.visited or cell in self.confirmed_pits or cell == self.confirmed_wumpus:
                 continue
@@ -111,7 +124,6 @@ class ProbabilisticAgent:
             if not next_steps:
                 return "Blocked! Hich masir e amni baraye edameh nist."
 
-            # حرکت به نزدیکترین خانه امن
             moved = False
             for cell in sorted(next_steps):
                 path = self.get_path_to(cell)
@@ -123,11 +135,17 @@ class ProbabilisticAgent:
             if not moved:
                 return "Blocked! Hich masir e amni baraye edameh nist."
 
-# ---- تعریف محیط طبق کدهای قبلی ----
-# محیط را بر اساس کدی که داری تعریف کن و این کلاس رو اجرا کن
 
-# نمونه‌سازی و اجرای عامل
+# تعریف جهان نمونه (۴x۴)
+world = [
+    ['B', 'B', '', 'G'],
+    ['P', 'B', 'S', ''],
+    ['B', 'SB', 'S', 'S'],
+    ['', 'S', 'W', 'S']
+]
+
+env = Environment(world)
 agent = ProbabilisticAgent(env, risk_threshold=0.01)
 result = agent.explore()
 print(result)
-print("Path:", agent.path)
+print("Masir:", agent.path)
