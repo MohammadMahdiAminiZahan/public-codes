@@ -124,4 +124,5 @@ world = [
 env = Environment(world)
 agent = InferenceAgent(env)
 agent.explore()
-print("\n🧭 Masir tay shode:", agent.path)
+print("
+🧭 Masir tay shode:", [(x, 3 - y) for (x, y) in agent.path])
