@@ -68,7 +68,7 @@ class InferenceAgent:
             if (cx, cy) == target:
                 return path
             for nx, ny in self.env.neighbors(cx, cy):
-                if (nx, ny) not in visited and self.knowledge.get((nx, ny)) == 'Safe':
+                if (nx, ny) not in visited and self.knowledge.get((nx, ny)) == 'Safe' and (nx, ny) not in self.unsafe:
                     visited.add((nx, ny))
                     queue.append(((nx, ny), path + [(nx, ny)]))
         return []
@@ -79,8 +79,11 @@ class InferenceAgent:
             self.visited.add((x, y))
             percepts = self.env.get_percepts(x, y)
             if 'G' in percepts:
-                print(f"🎉 Tala dar khane {x},{y} peida shod!")
+                print(f"🎉 Tala dar khane {x},{3 - y} peida shod!")
                 self.found_gold = True
+                return
+            if 'P' in percepts or 'W' in percepts:
+                print(f"💀 Agent dar khane {x},{3 - y} mord be dalil {percepts}!")
                 return
             if 'B' in percepts:
                 for nx, ny in self.env.neighbors(x, y):
@@ -99,7 +102,7 @@ class InferenceAgent:
 
             next_cell = None
             for cell in sorted(self.safe_to_visit):
-                if cell not in self.visited:
+                if cell not in self.visited and cell not in self.unsafe:
                     path = self.get_path_to(cell)
                     if path:
                         next_cell = cell
@@ -124,5 +127,4 @@ world = [
 env = Environment(world)
 agent = InferenceAgent(env)
 agent.explore()
-print("
-🧭 Masir tay shode:", [(x, 3 - y) for (x, y) in agent.path])
+print("\n🧭 Masir tay shode:", [(x, 3 - y) for (x, y) in agent.path])
