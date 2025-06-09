@@ -32,6 +32,7 @@ class InferenceAgent:
         self.path = [self.current]
 
     def infer(self):
+        # استنتاج کلاسیک اولیه
         for cell, sources in list(self.pit_candidates.items()):
             if len(sources) >= 2:
                 self.pit_confirmed = cell
@@ -42,6 +43,38 @@ class InferenceAgent:
                 self.wumpus_confirmed = cell
                 self.unsafe.add(cell)
 
+        # استنتاج پیشرفته: ومپوس کجاست؟
+        stench_sources = [cell for cell in self.visited if 'S' in self.env.get_percepts(*cell)]
+        if stench_sources:
+            possible_wumpus = set(self.env.neighbors(*stench_sources[0]))
+            for src in stench_sources[1:]:
+                possible_wumpus &= set(self.env.neighbors(*src))
+            if len(possible_wumpus) == 1:
+                self.wumpus_confirmed = list(possible_wumpus)[0]
+                self.unsafe.add(self.wumpus_confirmed)
+                # همسایه‌های سایر خانه‌ها امن هستند اگر ومپوس قطعی شد
+                for src in stench_sources:
+                    for n in self.env.neighbors(*src):
+                        if n != self.wumpus_confirmed and n not in self.visited:
+                            self.knowledge[n] = 'Safe'
+                            self.safe_to_visit.add(n)
+
+        # استنتاج پیشرفته: گودال کجاست؟
+        breeze_sources = [cell for cell in self.visited if 'B' in self.env.get_percepts(*cell)]
+        if breeze_sources:
+            possible_pit = set(self.env.neighbors(*breeze_sources[0]))
+            for src in breeze_sources[1:]:
+                possible_pit &= set(self.env.neighbors(*src))
+            if len(possible_pit) == 1:
+                self.pit_confirmed = list(possible_pit)[0]
+                self.unsafe.add(self.pit_confirmed)
+                for src in breeze_sources:
+                    for n in self.env.neighbors(*src):
+                        if n != self.pit_confirmed and n not in self.visited:
+                            self.knowledge[n] = 'Safe'
+                            self.safe_to_visit.add(n)
+
+        # خانه‌هایی که امن هستند
         for (x, y), status in list(self.knowledge.items()):
             if status == 'Safe':
                 for nx, ny in self.env.neighbors(x, y):
@@ -50,15 +83,6 @@ class InferenceAgent:
                         if 'B' not in percepts and 'S' not in percepts:
                             self.knowledge[(nx, ny)] = 'Safe'
                             self.safe_to_visit.add((nx, ny))
-
-        stench_sources = [cell for cell in self.visited if 'S' in self.env.get_percepts(*cell)]
-        for suspect, sources in list(self.wumpus_candidates.items()):
-            if all(suspect in self.env.neighbors(*src) for src in stench_sources):
-                for src in stench_sources:
-                    for n in self.env.neighbors(*src):
-                        if n != suspect and n not in self.visited:
-                            self.knowledge[n] = 'Safe'
-                            self.safe_to_visit.add(n)
 
     def get_path_to(self, target):
         queue = deque([(self.current, [self.current])])
@@ -100,9 +124,10 @@ class InferenceAgent:
             self.knowledge[(x, y)] = 'Safe'
             self.infer()
 
+            # فقط خانه‌هایی که ۱۰۰٪ امن هستند
             next_cell = None
             for cell in sorted(self.safe_to_visit):
-                if cell not in self.visited and cell not in self.unsafe:
+                if cell not in self.visited and cell not in self.unsafe and self.knowledge.get(cell) == 'Safe':
                     path = self.get_path_to(cell)
                     if path:
                         next_cell = cell
@@ -116,11 +141,11 @@ class InferenceAgent:
                 print("🚫 Hich masir amni baraye edame vojud nadarad.")
                 return
 
-# Mesal mohit
+# نمونه محیط ارتقایافته
 world = [
-    ['B', 'B', '', ''],
+    ['B', 'B', '', 'G'],
     ['P', 'B', 'S', ''],
-    ['B', 'GSB', 'S', 'S'],
+    ['B', 'SB', 'S', 'S'],
     ['', 'S', 'W', 'S']
 ]
 
