@@ -1,127 +1,133 @@
 from collections import deque, defaultdict
 
-class Environment:
-    def __init__(self, world):
-        self.world = world
-        self.width = len(world[0])
-        self.height = len(world)
-
-    def in_bounds(self, x, y):
-        return 0 <= x < self.width and 0 <= y < self.height
-
-    def neighbors(self, x, y):
-        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-        return [(x + dx, y + dy) for dx, dy in directions if self.in_bounds(x + dx, y + dy)]
-
-    def get_percepts(self, x, y):
-        return self.world[y][x]  # assumes top-left origin
-
-class InferenceAgent:
-    def __init__(self, env):
+class ProbabilisticAgent:
+    def __init__(self, env, risk_threshold=0.01):
         self.env = env
-        self.knowledge = dict()
+        self.start = (0, 3)
+        self.current = self.start
         self.visited = set()
-        self.safe_to_visit = set()
-        self.unsafe = set()
-        self.pit_candidates = defaultdict(set)
-        self.wumpus_candidates = defaultdict(set)
-        self.pit_confirmed = None
-        self.wumpus_confirmed = None
-        self.current = (0, 3)  # bottom-left
-        self.found_gold = False
-        self.path = [self.current]
+        self.safe = set([self.start])
+        self.frontier = set()
+        self.percepts = {}
+        self.pit_prob = defaultdict(lambda: 0.0)
+        self.wumpus_prob = defaultdict(lambda: 0.0)
+        self.confirmed_pits = set()
+        self.confirmed_wumpus = None
+        self.path = [self.start]
+        self.gold_found = False
+        self.risk_threshold = risk_threshold
 
-    def infer(self):
-        for cell, sources in self.pit_candidates.items():
-            if len(sources) >= 2:
-                self.pit_confirmed = cell
-                self.unsafe.add(cell)
+    def get_adjacent(self, x, y):
+        return self.env.neighbors(x, y)
 
-        for cell, sources in self.wumpus_candidates.items():
-            if len(sources) >= 2:
-                self.wumpus_confirmed = cell
-                self.unsafe.add(cell)
+    def record_percepts(self, cell):
+        percept = self.env.get_percepts(*cell)
+        self.percepts[cell] = percept
+        return percept
 
-        for (x, y), status in self.knowledge.items():
-            if status == 'Safe':
-                for nx, ny in self.env.neighbors(x, y):
-                    if (nx, ny) not in self.visited and (nx, ny) not in self.safe_to_visit:
-                        percepts = self.env.get_percepts(x, y)
-                        if 'B' not in percepts and 'S' not in percepts:
-                            self.knowledge[(nx, ny)] = 'Safe'
-                            self.safe_to_visit.add((nx, ny))
+    def update_probabilities(self):
+        # همه خانه‌ها که هنوز تایید نشده‌اند را به‌روزرسانی کن
+        for cell in self.env.all_cells():
+            if cell in self.safe or cell in self.confirmed_pits or cell == self.confirmed_wumpus:
+                continue
+            pit_p = 0.0
+            wumpus_p = 0.0
+            adj = self.get_adjacent(*cell)
+            # اگر هیچ خانه‌ای Breeze نداشت، احتمال Pit صفر است
+            breeze_sources = [c for c in adj if 'B' in self.percepts.get(c, '')]
+            if breeze_sources:
+                pit_p = 1 - (0.5 ** len(breeze_sources))  # مدل ساده احتمال با افزایش شواهد
+            else:
+                pit_p = 0.0
 
-        stench_sources = [cell for cell in self.visited if 'S' in self.env.get_percepts(*cell)]
-        for suspect, sources in self.wumpus_candidates.items():
-            if all(suspect in self.env.neighbors(*src) for src in stench_sources):
-                for src in stench_sources:
-                    for n in self.env.neighbors(*src):
-                        if n != suspect and n not in self.visited:
-                            self.knowledge[n] = 'Safe'
-                            self.safe_to_visit.add(n)
+            # اگر هیچ خانه‌ای Stench نداشت، احتمال Wumpus صفر است
+            stench_sources = [c for c in adj if 'S' in self.percepts.get(c, '')]
+            if stench_sources:
+                wumpus_p = 1 - (0.5 ** len(stench_sources))
+            else:
+                wumpus_p = 0.0
+
+            self.pit_prob[cell] = pit_p
+            self.wumpus_prob[cell] = wumpus_p
+
+        # اگر احتمال Pit یا Wumpus خیلی زیاد شد، تایید کن
+        for cell in list(self.pit_prob.keys()):
+            if self.pit_prob[cell] > 0.95:
+                self.confirmed_pits.add(cell)
+                if cell in self.safe:
+                    self.safe.remove(cell)
+        # و برای ومپوس
+        wumpus_candidates = [c for c,p in self.wumpus_prob.items() if p > 0.95]
+        if len(wumpus_candidates) == 1:
+            self.confirmed_wumpus = wumpus_candidates[0]
+            if self.confirmed_wumpus in self.safe:
+                self.safe.remove(self.confirmed_wumpus)
+
+    def mark_safe_cells(self):
+        # خانه‌هایی که احتمال Pit و Wumpus پایین‌تر از آستانه هستند امن شناخته شوند
+        for cell in self.env.all_cells():
+            if cell in self.visited or cell in self.confirmed_pits or cell == self.confirmed_wumpus:
+                continue
+            if self.pit_prob[cell] < self.risk_threshold and self.wumpus_prob[cell] < self.risk_threshold:
+                self.safe.add(cell)
+
+    def update_frontier(self):
+        for cell in self.visited:
+            for n in self.get_adjacent(*cell):
+                if n not in self.visited and n not in self.safe and n not in self.confirmed_pits and n != self.confirmed_wumpus:
+                    self.frontier.add(n)
 
     def get_path_to(self, target):
         queue = deque([(self.current, [self.current])])
         visited = set()
         while queue:
-            (cx, cy), path = queue.popleft()
-            if (cx, cy) == target:
+            (x, y), path = queue.popleft()
+            if (x, y) == target:
                 return path
-            for nx, ny in self.env.neighbors(cx, cy):
-                if (nx, ny) not in visited and self.knowledge.get((nx, ny)) == 'Safe':
+            for nx, ny in self.env.neighbors(x, y):
+                if (nx, ny) not in visited and (nx, ny) in self.safe:
                     visited.add((nx, ny))
                     queue.append(((nx, ny), path + [(nx, ny)]))
         return []
 
     def explore(self):
-        while not self.found_gold:
+        while True:
             x, y = self.current
             self.visited.add((x, y))
-            percepts = self.env.get_percepts(x, y)
-            if 'G' in percepts:
-                print(f"🎉 طلا در خانه {x},{y} پیدا شد!")
-                self.found_gold = True
-                return
-            if 'B' in percepts:
-                for nx, ny in self.env.neighbors(x, y):
-                    self.pit_candidates[(nx, ny)].add((x, y))
-            if 'S' in percepts:
-                for nx, ny in self.env.neighbors(x, y):
-                    self.wumpus_candidates[(nx, ny)].add((x, y))
-            if 'B' not in percepts and 'S' not in percepts:
-                for nx, ny in self.env.neighbors(x, y):
-                    if (nx, ny) not in self.knowledge:
-                        self.knowledge[(nx, ny)] = 'Safe'
-                        self.safe_to_visit.add((nx, ny))
+            percept = self.record_percepts((x, y))
 
-            self.knowledge[(x, y)] = 'Safe'
-            self.infer()
+            if 'P' in percept or 'W' in percept:
+                return f"Khatar! Mordan dar khaneh {self.current} ba {percept}"
 
-            next_cell = None
-            for cell in sorted(self.safe_to_visit):
-                if cell not in self.visited:
-                    path = self.get_path_to(cell)
-                    if path:
-                        next_cell = cell
-                        break
+            if 'G' in percept:
+                self.gold_found = True
+                return f"Gold peyda shod dar {self.current}! Masir: {self.path}"
 
-            if next_cell:
-                path = self.get_path_to(next_cell)
-                self.path.extend(path[1:])
-                self.current = next_cell
-            else:
-                print("🚫 هیچ مسیر امنی برای ادامه وجود ندارد.")
-                return
+            self.update_probabilities()
+            self.mark_safe_cells()
+            self.update_frontier()
 
-# مثال محیط
-world = [
-    ['B', 'B', '', ''],
-    ['P', 'B', 'S', ''],
-    ['B', 'GSB', 'S', 'S'],
-    ['', 'S', 'W', 'S']
-]
+            next_steps = [cell for cell in self.safe if cell not in self.visited]
+            if not next_steps:
+                return "Blocked! Hich masir e amni baraye edameh nist."
 
-env = Environment(world)
-agent = InferenceAgent(env)
-agent.explore()
-print("\n🧭 مسیر طی شده:", agent.path)
+            # حرکت به نزدیکترین خانه امن
+            moved = False
+            for cell in sorted(next_steps):
+                path = self.get_path_to(cell)
+                if path:
+                    self.path.extend(path[1:])
+                    self.current = cell
+                    moved = True
+                    break
+            if not moved:
+                return "Blocked! Hich masir e amni baraye edameh nist."
+
+# ---- تعریف محیط طبق کدهای قبلی ----
+# محیط را بر اساس کدی که داری تعریف کن و این کلاس رو اجرا کن
+
+# نمونه‌سازی و اجرای عامل
+agent = ProbabilisticAgent(env, risk_threshold=0.01)
+result = agent.explore()
+print(result)
+print("Path:", agent.path)
